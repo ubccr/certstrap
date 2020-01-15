@@ -25,50 +25,50 @@ import (
 
 	"github.com/square/certstrap/depot"
 	"github.com/square/certstrap/pkix"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // NewSignCommand sets up a "sign" command to sign a CSR with a given CA for a new certificate
-func NewSignCommand() cli.Command {
-	return cli.Command{
+func NewSignCommand() *cli.Command {
+	return &cli.Command{
 		Name:        "sign",
 		Usage:       "Sign certificate request",
 		Description: "Sign certificate request with CA, and generate certificate for the host.",
 		Flags: []cli.Flag{
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "passphrase",
 				Usage: "Passphrase to decrypt private-key PEM block of CA",
 			},
-			cli.IntFlag{
+			&cli.IntFlag{
 				Name:   "years",
 				Hidden: true,
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "expires",
 				Value: "2 years",
 				Usage: "How long until the certificate expires (example: 1 year 2 days 3 months 4 hours)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "CA",
 				Usage: "Name of CA to issue cert with",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "csr",
 				Usage: "Path to certificate request PEM file (if blank, will use --depot-path and default name)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "cert",
 				Usage: "Path to certificate output PEM file (if blank, will use --depot-path and default name)",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:  "stdout",
 				Usage: "Print certificate to stdout in addition to saving file",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:  "intermediate",
 				Usage: "Whether generated certificate should be a intermediate",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:  "codesigning",
 				Usage: "Whether generated certificate should include the codeSigning extended key usage extension",
 			},
@@ -77,18 +77,16 @@ func NewSignCommand() cli.Command {
 	}
 }
 
-func newSignAction(c *cli.Context) {
-	if len(c.Args()) != 1 {
-		fmt.Fprintln(os.Stderr, "One host name must be provided.")
-		os.Exit(1)
+func newSignAction(c *cli.Context) error {
+	if c.Args().Len() != 1 {
+		return fmt.Errorf("One host name must be provided.")
 	}
 
-	formattedReqName := strings.Replace(c.Args()[0], " ", "_", -1)
+	formattedReqName := strings.Replace(c.Args().First(), " ", "_", -1)
 	formattedCAName := strings.Replace(c.String("CA"), " ", "_", -1)
 
 	if depot.CheckCertificate(d, formattedReqName) {
-		fmt.Fprintf(os.Stderr, "Certificate \"%s\" already exists!\n", formattedReqName)
-		os.Exit(1)
+		return fmt.Errorf("Certificate \"%s\" already exists!", formattedReqName)
 	}
 
 	expires := c.String("expires")
@@ -100,45 +98,38 @@ func newSignAction(c *cli.Context) {
 	// Token based parsing would provide better feedback but
 	expiresTime, err := parseExpiry(expires)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid expiry: %s\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Invalid expiry: %s", err)
 	}
 
 	csr, err := getCertificateSigningRequest(c, d, formattedReqName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Get certificate request error:", err)
-		os.Exit(1)
+		return fmt.Errorf("Get certificate request error: %s", err)
 	}
 	crt, err := depot.GetCertificate(d, formattedCAName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Get CA certificate error:", err)
-		os.Exit(1)
+		return fmt.Errorf("Get CA certificate error: %s", err)
 	}
 	// Validate that crt is allowed to sign certificates.
 	raw_crt, err := crt.GetRawCertificate()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "GetRawCertificate failed on CA certificate:", err)
-		os.Exit(1)
+		return fmt.Errorf("GetRawCertificate failed on CA certificate: %s", err)
 	}
 	// We punt on checking BasicConstraintsValid and checking MaxPathLen. The goal
 	// is to prevent accidentally creating invalid certificates, not protecting
 	// against malicious input.
 	if !raw_crt.IsCA {
-		fmt.Fprintln(os.Stderr, "Selected CA certificate is not allowed to sign certificates.")
-		os.Exit(1)
+		return fmt.Errorf("Selected CA certificate is not allowed to sign certificates.")
 	}
 
 	key, err := depot.GetPrivateKey(d, formattedCAName)
 	if err != nil {
 		pass, err := getPassPhrase(c, "CA key")
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Get CA key error: ", err)
-			os.Exit(1)
+			return fmt.Errorf("Get CA key error: %s", err)
 		}
 		key, err = depot.GetEncryptedPrivateKey(d, formattedCAName, pass)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Get CA key error: ", err)
-			os.Exit(1)
+			return fmt.Errorf("Get CA key error: %s", err)
 		}
 	}
 
@@ -157,8 +148,7 @@ func newSignAction(c *cli.Context) {
 	}
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Create certificate error:", err)
-		os.Exit(1)
+		return fmt.Errorf("Create certificate error: %s", err)
 	} else {
 		fmt.Printf("Created %s/%s.crt from %s/%s.csr signed by %s/%s.key\n", depotDir, formattedReqName, depotDir, formattedReqName, depotDir, formattedCAName)
 	}
@@ -166,14 +156,15 @@ func newSignAction(c *cli.Context) {
 	if c.Bool("stdout") {
 		crtBytes, err := crtOut.Export()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Print certificate error:", err)
-			os.Exit(1)
+			return fmt.Errorf("Print certificate error: %s", err)
 		} else {
 			fmt.Printf(string(crtBytes))
 		}
 	}
 
 	if err = putCertificate(c, d, formattedReqName, crtOut); err != nil {
-		fmt.Fprintln(os.Stderr, "Save certificate error:", err)
+		return fmt.Errorf("Save certificate error: %s", err)
 	}
+
+	return nil
 }

@@ -20,68 +20,67 @@ package cmd
 import (
 	"fmt"
 	"io/ioutil"
-	"os"
 	"strings"
 
 	"github.com/square/certstrap/depot"
 	"github.com/square/certstrap/pkix"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // NewInitCommand sets up an "init" command to initialize a new CA
-func NewInitCommand() cli.Command {
-	return cli.Command{
+func NewInitCommand() *cli.Command {
+	return &cli.Command{
 		Name:        "init",
 		Usage:       "Create Certificate Authority",
 		Description: "Create Certificate Authority, including certificate, key and extra information file.",
 		Flags: []cli.Flag{
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "passphrase",
 				Usage: "Passphrase to encrypt private key PEM block",
 			},
-			cli.IntFlag{
+			&cli.IntFlag{
 				Name:  "key-bits",
 				Value: 4096,
 				Usage: "Size (in bits) of RSA keypair to generate (example: 4096)",
 			},
-			cli.IntFlag{
+			&cli.IntFlag{
 				Name:   "years",
 				Hidden: true,
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "expires",
 				Value: "18 months",
 				Usage: "How long until the certificate expires (example: 1 year 2 days 3 months 4 hours)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "organization, o",
 				Usage: "Sets the Organization (O) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "organizational-unit, ou",
 				Usage: "Sets the Organizational Unit (OU) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "country, c",
 				Usage: "Sets the Country (C) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "common-name, cn",
 				Usage: "Sets the Common Name (CN) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "province, st",
 				Usage: "Sets the State/Province (ST) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "locality, l",
 				Usage: "Sets the Locality (L) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "key",
 				Usage: "Path to private key PEM file (if blank, will generate new key pair)",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:  "stdout",
 				Usage: "Print certificate to stdout in addition to saving file",
 			},
@@ -90,17 +89,15 @@ func NewInitCommand() cli.Command {
 	}
 }
 
-func initAction(c *cli.Context) {
+func initAction(c *cli.Context) error {
 	if !c.IsSet("common-name") {
-		fmt.Println("Must supply Common Name for CA")
-		os.Exit(1)
+		return fmt.Errorf("Must supply Common Name for CA")
 	}
 
 	formattedName := strings.Replace(c.String("common-name"), " ", "_", -1)
 
 	if depot.CheckCertificate(d, formattedName) || depot.CheckPrivateKey(d, formattedName) {
-		fmt.Fprintf(os.Stderr, "CA with specified name \"%s\" already exists!\n", formattedName)
-		os.Exit(1)
+		return fmt.Errorf("CA with specified name \"%s\" already exists!", formattedName)
 	}
 
 	var err error
@@ -113,8 +110,7 @@ func initAction(c *cli.Context) {
 	// Token based parsing would provide better feedback but
 	expiresTime, err := parseExpiry(expires)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Invalid expiry: %s\n", err)
-		os.Exit(1)
+		return fmt.Errorf("Invalid expiry: %s\n", err)
 	}
 
 	var passphrase []byte
@@ -123,8 +119,7 @@ func initAction(c *cli.Context) {
 	} else {
 		passphrase, err = createPassPhrase()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 	}
 
@@ -133,15 +128,13 @@ func initAction(c *cli.Context) {
 		keyBytes, err := ioutil.ReadFile(c.String("key"))
 		key, err = pkix.NewKeyFromPrivateKeyPEM(keyBytes)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Read Key error:", err)
-			os.Exit(1)
+			return fmt.Errorf("Read Key error: %s", err)
 		}
 		fmt.Printf("Read %s\n", c.String("key"))
 	} else {
 		key, err = pkix.CreateRSAKey(c.Int("key-bits"))
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Create RSA Key error:", err)
-			os.Exit(1)
+			return fmt.Errorf("Create RSA Key error: %s", err)
 		}
 		if len(passphrase) > 0 {
 			fmt.Printf("Created %s/%s.key (encrypted by passphrase)\n", depotDir, formattedName)
@@ -152,43 +145,40 @@ func initAction(c *cli.Context) {
 
 	crt, err := pkix.CreateCertificateAuthority(key, c.String("organizational-unit"), expiresTime, c.String("organization"), c.String("country"), c.String("province"), c.String("locality"), c.String("common-name"))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Create certificate error:", err)
-		os.Exit(1)
+		return fmt.Errorf("Create certificate error: %s", err)
 	}
 	fmt.Printf("Created %s/%s.crt\n", depotDir, formattedName)
 
 	if c.Bool("stdout") {
 		crtBytes, err := crt.Export()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Print CA certificate error:", err)
-			os.Exit(1)
+			return fmt.Errorf("Print CA certificate error: %s", err)
 		} else {
 			fmt.Printf(string(crtBytes))
 		}
 	}
 
 	if err = depot.PutCertificate(d, formattedName, crt); err != nil {
-		fmt.Fprintln(os.Stderr, "Save certificate error:", err)
+		return fmt.Errorf("Save certificate error: %s", err)
 	}
 	if len(passphrase) > 0 {
 		if err = depot.PutEncryptedPrivateKey(d, formattedName, key, passphrase); err != nil {
-			fmt.Fprintln(os.Stderr, "Save encrypted private key error:", err)
+			return fmt.Errorf("Save encrypted private key error: %s", err)
 		}
 	} else {
 		if err = depot.PutPrivateKey(d, formattedName, key); err != nil {
-			fmt.Fprintln(os.Stderr, "Save private key error:", err)
+			return fmt.Errorf("Save private key error: %s", err)
 		}
 	}
 
 	// Create an empty CRL, this is useful for Java apps which mandate a CRL.
 	crl, err := pkix.CreateCertificateRevocationList(key, crt, expiresTime)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Create CRL error:", err)
-		os.Exit(1)
+		return fmt.Errorf("Create CRL error: %s", err)
 	}
 	if err = depot.PutCertificateRevocationList(d, formattedName, crl); err != nil {
-		fmt.Fprintln(os.Stderr, "Save CRL error:", err)
-		os.Exit(1)
+		return fmt.Errorf("Save CRL error: %s", err)
 	}
 	fmt.Printf("Created %s/%s.crl\n", depotDir, formattedName)
+	return nil
 }

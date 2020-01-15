@@ -22,7 +22,7 @@ import (
 
 	"github.com/square/certstrap/cmd"
 	"github.com/square/certstrap/depot"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // release is overriden by the build script using -X argument that is passed to the Go linker.
@@ -34,16 +34,14 @@ func main() {
 	app.Version = release
 	app.Usage = "A simple certificate manager written in Go, to bootstrap your own certificate authority and public key infrastructure."
 	app.Flags = []cli.Flag{
-		cli.StringFlag{
-			Name:   "depot-path",
-			Value:  depot.DefaultFileDepotDir,
-			Usage:  "Location to store certificates, keys and other files.",
-			EnvVar: "",
+		&cli.StringFlag{
+			Name:  "depot-path",
+			Value: depot.DefaultFileDepotDir,
+			Usage: "Location to store certificates, keys and other files.",
 		},
 	}
-	app.Author = "Square Inc., CoreOS"
-	app.Email = ""
-	app.Commands = []cli.Command{
+	app.Authors = []*cli.Author{{Name: "Square Inc., CoreOS", Email: ""}}
+	app.Commands = []*cli.Command{
 		cmd.NewInitCommand(),
 		cmd.NewCertRequestCommand(),
 		cmd.NewSignCommand(),

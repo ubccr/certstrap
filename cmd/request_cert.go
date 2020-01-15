@@ -26,70 +26,70 @@ import (
 
 	"github.com/square/certstrap/depot"
 	"github.com/square/certstrap/pkix"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 // NewCertRequestCommand sets up a "request-cert" command to create a request for a new certificate (CSR)
-func NewCertRequestCommand() cli.Command {
-	return cli.Command{
+func NewCertRequestCommand() *cli.Command {
+	return &cli.Command{
 		Name:        "request-cert",
 		Usage:       "Create certificate request for host",
 		Description: "Create certificate for host, including certificate signing request and key. Must sign the request in order to generate a certificate.",
 		Flags: []cli.Flag{
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "passphrase",
 				Usage: "Passphrase to encrypt private-key PEM block",
 			},
-			cli.IntFlag{
+			&cli.IntFlag{
 				Name:  "key-bits",
 				Value: 2048,
 				Usage: "Size (in bits) of RSA keypair to generate (example: 4096)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "organization, o",
 				Usage: "Sets the Organization (O) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "country, c",
 				Usage: "Sets the Country (C) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "locality, l",
 				Usage: "Sets the Locality (L) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "common-name, cn",
 				Usage: "Sets the Common Name (CN) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "organizational-unit, ou",
 				Usage: "Sets the Organizational Unit (OU) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "province, st",
 				Usage: "Sets the State/Province (ST) field of the certificate",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "ip",
 				Usage: "IP addresses to add as subject alt name (comma separated)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "domain",
 				Usage: "DNS entries to add as subject alt name (comma separated)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "uri",
 				Usage: "URI values to add as subject alt name (comma separated)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "key",
 				Usage: "Path to private key PEM file (if blank or if file doesn't exist, will generate new keypair)",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "csr",
 				Usage: "Path to CSR output PEM file (if blank, will use --depot-path and default name)",
 			},
-			cli.BoolFlag{
+			&cli.BoolFlag{
 				Name:  "stdout",
 				Usage: "Print signing request to stdout in addition to saving file",
 			},
@@ -98,7 +98,7 @@ func NewCertRequestCommand() cli.Command {
 	}
 }
 
-func newCertAction(c *cli.Context) {
+func newCertAction(c *cli.Context) error {
 	var name = ""
 	var err error
 
@@ -106,16 +106,14 @@ func newCertAction(c *cli.Context) {
 	ips, err := pkix.ParseAndValidateIPs(c.String("ip"))
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	// The CLI Context returns an empty string ("") if no value is available
 	uris, err := pkix.ParseAndValidateURIs(c.String("uri"))
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	domains := strings.Split(c.String("domain"), ",")
@@ -137,8 +135,7 @@ func newCertAction(c *cli.Context) {
 
 	// skip the check if the --csr option is specified
 	if !c.IsSet("csr") && (depot.CheckCertificateSigningRequest(d, formattedName) || depot.CheckPrivateKey(d, formattedName)) {
-		fmt.Fprintf(os.Stderr, "Certificate request \"%s\" already exists!\n", formattedName)
-		os.Exit(1)
+		return fmt.Errorf("Certificate request \"%s\" already exists!", formattedName)
 	}
 
 	var passphrase []byte
@@ -147,8 +144,7 @@ func newCertAction(c *cli.Context) {
 	} else {
 		passphrase, err = createPassPhrase()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 	}
 
@@ -159,15 +155,13 @@ func newCertAction(c *cli.Context) {
 		keyBytes, err := ioutil.ReadFile(c.String("key"))
 		key, err = pkix.NewKeyFromPrivateKeyPEM(keyBytes)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Read Key error:", err)
-			os.Exit(1)
+			return fmt.Errorf("Read Key error: %s", err)
 		}
 		fmt.Printf("Read %s\n", keyFilepath)
 	} else {
 		key, err = pkix.CreateRSAKey(c.Int("key-bits"))
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Create RSA Key error:", err)
-			os.Exit(1)
+			return fmt.Errorf("Create RSA Key error: %s", err)
 		}
 		keyFilepath := fileName(c, "key", depotDir, formattedName, "key")
 		if len(passphrase) > 0 {
@@ -179,8 +173,7 @@ func newCertAction(c *cli.Context) {
 
 	csr, err := pkix.CreateCertificateSigningRequest(key, c.String("organizational-unit"), ips, domains, uris, c.String("organization"), c.String("country"), c.String("province"), c.String("locality"), name)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Create certificate request error:", err)
-		os.Exit(1)
+		return fmt.Errorf("Create certificate request error: %s", err)
 	} else {
 		fmt.Printf("Created %s\n", fileName(c, "csr", depotDir, formattedName, "csr"))
 	}
@@ -188,25 +181,26 @@ func newCertAction(c *cli.Context) {
 	if c.Bool("stdout") {
 		csrBytes, err := csr.Export()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Print certificate request error:", err)
-			os.Exit(1)
+			return fmt.Errorf("Print certificate request error: %s", err)
 		} else {
 			fmt.Printf(string(csrBytes))
 		}
 	}
 
 	if err = putCertificateSigningRequest(c, d, formattedName, csr); err != nil {
-		fmt.Fprintln(os.Stderr, "Save certificate request error:", err)
+		return fmt.Errorf("Save certificate request error: %s", err)
 	}
 	if len(passphrase) > 0 {
 		if err = putEncryptedPrivateKey(c, d, formattedName, key, passphrase); err != nil {
-			fmt.Fprintln(os.Stderr, "Save encrypted private key error:", err)
+			return fmt.Errorf("Save encrypted private key error: %s", err)
 		}
 	} else {
 		if err = putPrivateKey(c, d, formattedName, key); err != nil {
-			fmt.Fprintln(os.Stderr, "Save private key error:", err)
+			return fmt.Errorf("Save private key error: %s", err)
 		}
 	}
+
+	return nil
 }
 
 func formatName(name string) string {

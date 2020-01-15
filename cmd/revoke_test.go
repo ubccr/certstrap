@@ -10,7 +10,7 @@ import (
 
 	"github.com/square/certstrap/depot"
 	"github.com/square/certstrap/pkix"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 const (

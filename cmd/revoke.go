@@ -12,7 +12,7 @@ import (
 
 	"github.com/square/certstrap/depot"
 	"github.com/square/certstrap/pkix"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 )
 
 type revokeCommand struct {
@@ -20,17 +20,17 @@ type revokeCommand struct {
 }
 
 // NewRevokeCommand revokes the given certificate by adding it to the CA's CRL.
-func NewRevokeCommand() cli.Command {
-	return cli.Command{
+func NewRevokeCommand() *cli.Command {
+	return &cli.Command{
 		Name:        "revoke",
 		Usage:       "Revoke certificate",
 		Description: "Add certificate to the CA's CRL.",
 		Flags: []cli.Flag{
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "CN",
 				Usage: "Common Name (CN) of certificate to revoke",
 			},
-			cli.StringFlag{
+			&cli.StringFlag{
 				Name:  "CA",
 				Usage: "Name of CA under which certificate was issued",
 			},
@@ -60,17 +60,26 @@ func (c *revokeCommand) parseArgs(ctx *cli.Context) error {
 	return nil
 }
 
-func (c *revokeCommand) run(ctx *cli.Context) {
-	c.checkErr(c.parseArgs(ctx))
+func (c *revokeCommand) run(ctx *cli.Context) error {
+	err := c.parseArgs(ctx)
+	if err != nil {
+		return err
+	}
 
 	caCert, err := c.CAx509Certificate()
-	c.checkErr(err)
+	if err != nil {
+		return err
+	}
 
 	cnCert, err := c.CNx509Certificate()
-	c.checkErr(err)
+	if err != nil {
+		return err
+	}
 
 	revoked, err := c.revokedCertificates()
-	c.checkErr(err)
+	if err != nil {
+		return err
+	}
 
 	revoked = append(revoked, x509pkix.RevokedCertificate{
 		SerialNumber:   cnCert.SerialNumber,
@@ -78,7 +87,11 @@ func (c *revokeCommand) run(ctx *cli.Context) {
 	})
 
 	err = c.saveRevokedCertificates(caCert, revoked)
-	c.checkErr(err)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *revokeCommand) CAx509Certificate() (*x509.Certificate, error) {
